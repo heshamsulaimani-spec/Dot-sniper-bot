@@ -1,43 +1,38 @@
 import os
 import threading
-import requests
 from flask import Flask
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-flask_app = Flask(__name__)
+app_flask = Flask(__name__)
 
-@flask_app.route('/')
+@app_flask.route('/')
 def home():
-   return "Bot is Alive!"
+   return "Bot is Live!"
 
-async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-   if len(context.args) < 5:
-       await update.message.reply_text("الصيغة: /buy DOT 4.25 3.9 4.5 4.8 5.2")
-       return
+async def buy(update, context):
    try:
-       coin = context.args[0].upper()
-       entry, sl, t1, t2 = context.args[1], context.args[2], context.args[3], context.args[4]
-       t3 = context.args[5] if len(context.args) > 5 else ""
-
-       r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=10)
-       btc_price = float(r.json()['price'])
-
-       msg = f"🚀 {coin}\nدخول: {entry}\nوقف: {sl}\nاهداف: {t1} - {t2} {t3}\nBTC: {btc_price}$"
-       if btc_price < 60000:
-           msg += "\n⚠️ بيتكوين خطر"
+       # /buy DOT 4.25 3.9 4.5 4.8
+       args = context.args
+       if len(args) < 5:
+           await update.message.reply_text("الطريقة: /buy العملة سعر_الدخول ستوب هدف1 هدف2")
+           return
+       coin, entry, stop, tp1, tp2 = args[0], args[1], args[2], args[3], args[4]
+       msg = f"✅ تم تسجيل صفقة {coin}\nدخول: {entry}\nستوب: {stop}\nأهداف: {tp1} - {tp2}\n\nالبوت شغال ويتابعها الآن..."
        await update.message.reply_text(msg)
    except Exception as e:
        await update.message.reply_text(f"خطأ: {e}")
 
-def run_flask():
-   port = int(os.environ.get("PORT", 10000))
-   flask_app.run(host='0.0.0.0', port=port)
-
-if __name__ == "__main__":
-   threading.Thread(target=run_flask, daemon=True).start()
+def run_bot():
    app = ApplicationBuilder().token(BOT_TOKEN).build()
    app.add_handler(CommandHandler("buy", buy))
+   print("Bot polling started...")
    app.run_polling()
+
+if __name__ == '__main__':
+   # شغل البوت في ثريد ثاني
+   threading.Thread(target=run_bot, daemon=True).start()
+   # شغل Flask عشان Render ما يطفي الخدمة
+   port = int(os.environ.get("PORT", 10000))
+   app_flask.run(host='0.0.0.0', port=port)

@@ -1,30 +1,25 @@
 import os
 import threading
 from flask import Flask
-from telegram.ext import Updater, CommandHandler
+from telegram.ext import ApplicationBuilder, CommandHandler
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+app_flask = Flask(__name__)
 
-app = Flask(__name__)
-
-@app.route('/')
+@app_flask.route('/')
 def home():
    return "Bot is Live!"
 
-def start(update, context):
-   update.message.reply_text("البوت شغال 100% ✅")
+async def start(update, context):
+   await update.message.reply_text("البوت شغال 100% ✅")
 
 def run_bot():
-   updater = Updater(BOT_TOKEN, use_context=True)
-   dp = updater.dispatcher
-   dp.add_handler(CommandHandler("start", start))
-   # هنا حط باقي أوامر توصيات الدوت حقتك
-   updater.start_polling()
-   updater.idle()
+   application = ApplicationBuilder().token(BOT_TOKEN).build()
+   application.add_handler(CommandHandler("start", start))
+   # هنا اضف باقي اوامر الدوت
+   application.run_polling()
 
 if __name__ == "__main__":
-   # شغل البوت في الخلفية
-   threading.Thread(target=run_bot).start()
-   # شغل الموقع عشان Render يشوفه Live
+   threading.Thread(target=run_bot, daemon=True).start()
    port = int(os.environ.get("PORT", 10000))
-   app.run(host='0.0.0.0', port=port)
+   app_flask.run(host='0.0.0.0', port=port)

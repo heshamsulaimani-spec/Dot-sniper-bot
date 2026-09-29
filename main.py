@@ -5,26 +5,25 @@ from telegram.ext import ApplicationBuilder, CommandHandler
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-app_flask = Flask(__name__)
+flask_app = Flask(__name__)
 
-@app_flask.route('/')
+@flask_app.route('/')
 def home():
-   return "Bot is Live!"
+   return "Bot is Live and Running!"
 
 async def start(update, context):
-   await update.message.reply_text("البوت شغال 100% ✅")
+   await update.message.reply_text("البوت شغال 100% ✅ قول /buy")
 
 def run_flask():
    port = int(os.environ.get("PORT", 10000))
-   app_flask.run(host='0.0.0.0', port=port)
-
-def run_bot():
-   application = ApplicationBuilder().token(BOT_TOKEN).build()
-   application.add_handler(CommandHandler("start", start))
-   application.run_polling()
+   flask_app.run(host='0.0.0.0', port=port)
 
 if __name__ == "__main__":
-   # Flask في الخلفية
+   # شغل موقع Flask في الخلفية
    threading.Thread(target=run_flask, daemon=True).start()
-   # البوت في الواجهة عشان يرد
-   run_bot()
+
+   # شغل البوت في الواجهة الرئيسية
+   app = ApplicationBuilder().token(BOT_TOKEN).build()
+   app.add_handler(CommandHandler("start", start))
+   print("Bot started polling...")
+   app.run_polling()

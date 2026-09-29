@@ -7,7 +7,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-   return "Bot is LIVE ✅"
+   return "Bot is LIVE"
 
 def run_bot():
    token = os.environ.get("BOT_TOKEN")
@@ -15,7 +15,7 @@ def run_bot():
        print("No BOT_TOKEN")
        return
    def start(update, context):
-       update.message.reply_text("شغال LIVE ✅")
+       update.message.reply_text("شغال LIVE")
    updater = Updater(token, use_context=True)
    updater.dispatcher.add_handler(CommandHandler("start", start))
    updater.start_polling()

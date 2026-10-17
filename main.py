@@ -1,52 +1,68 @@
-import os, asyncio, ccxt, threading
+import os
+import time
+import requests
+import ccxt
 import pandas as pd
 import ta
-from telegram import Bot
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from datetime import datetime
 
-TOKEN = os.getenv("BOT_TOKEN")
+# ياخذها من Render تلقائي
+TELEGRAM_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-class H(BaseHTTPRequestHandler):
-   def do_GET(self):
-       self.send_response(200)
-       self.end_headers()
-       self.wfile.write(b"Bot is running")
-   def log_message(self, *args):
-       pass
-
-def run_web():
-   port = int(os.environ.get("PORT", 10000))
-   HTTPServer(('0.0.0.0', port), H).serve_forever()
-
-threading.Thread(target=run_web, daemon=True).start()
+# الـ 23 عملة كلها
+COINS = [
+   "BTC/USDT","ETH/USDT","OP/USDT","RENDER/USDT","QNT/USDT","AVAX/USDT","SOL/USDT","DOT/USDT","LINK/USDT","BNB/USDT",
+   "TAO/USDT","ARB/USDT","SEI/USDT","SUI/USDT","INJ/USDT","NEAR/USDT","FIL/USDT","FET/USDT","ADA/USDT","ZRO/USDT",
+   "DYDX/USDT","AEVO/USDT","LTC/USDT"
+]
 
 exchange = ccxt.binance()
-bot = Bot(token=TOKEN)
-COINS = ["WLD/USDT","FIL/USDT","QNT/USDT","BTC/USDT","ETH/USDT","SOL/USDT","OP/USDT","AVAX/USDT","DOT/USDT","LINK/USDT","BNB/USDT","ARB/USDT"]
 
-def signal(s):
+def send_telegram(text):
+   url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
    try:
-       b = exchange.fetch_ohlcv(s, '15m', limit=100)
-       df = pd.DataFrame(b, columns=['t','o','h','l','c','v'])
-       c = df['c']
-       rsi = ta.momentum.RSIIndicator(c, 14).rsi().iloc[-1]
-       ema = ta.trend.EMAIndicator(c, 20).ema_indicator().iloc[-1]
-       p = c.iloc[-1]
-       low = df['l'].tail(20).min()
-       if rsi < 38 and p <= low * 1.015 and p > ema:
-           return f"🟢 {s.replace('/USDT','')} دخول {p:.4f} هدف {p*1.018:.4f} وقف {p*0.99:.4f}"
-   except:
-       pass
+       requests.post(url, data={"chat_id": CHAT_ID, "text": text}, timeout=10)
+   except Exception as e:
+       print(f"telegram error: {e}")
 
-async def main():
-   await bot.send_message(chat_id=CHAT_ID, text="✅ البوت اشتغل - هذه آخر مرة نعدل الكود")
+def check_all():
+   for symbol in COINS:
+       try:
+           bars = exchange.fetch_ohlcv(symbol, '15m', limit=100)
+           df = pd.DataFrame(bars, columns=['time','open','high','low','close','volume'])
+           df['rsi'] = ta.momentum.RSIIndicator(df['close'], 14).rsi()
+           df['ema20'] = ta.trend.EMAIndicator(df['close'], 20).ema_indicator()
+           df['vol_avg'] = df['volume'].rolling(20).mean()
+           last = df.iloc[-1]
+
+           rsi = last['rsi']
+           trend = "Bearish" if last['close'] < last['ema20'] else "Bullish"
+           vol_conf = last['volume'] / last['vol_avg'] if last['vol_avg'] > 0 else 1
+
+           signal = None
+           if rsi < 40 and trend == "Bearish" and vol_conf > 1.0:
+               signal = "🔴 EXIT SIGNAL - Sell your holdings"
+           elif rsi < 35 and trend == "Bullish" and vol_conf > 1.2:
+               signal = "🟢 BUY SIGNAL - Opportunity"
+
+           if signal:
+               conf = round(50 + abs(last['close']-last['ema20'])/last['close']*500 + vol_conf*5, 1)
+               msg = f"""🤖 dot-bot | {symbol}
+Signal: {signal}
+Current price: {last['close']:.4f}
+RSI(14): {rsi:.2f} | 15m trend: {trend}
+Volume confirmation: {vol_conf:.2f}x 20-candle average
+Confidence: {conf}%
+Candle: {datetime.utcfromtimestamp(last['time']/1000)} UTC"""
+               send_telegram(msg)
+               print(f"sent {symbol}")
+       except Exception as e:
+           print(f"error {symbol}: {e}")
+       time.sleep(1)
+
+if __name__ == "__main__":
+   send_telegram(f"البوت اشتغل ✅ - أراقب الآن {len(COINS)} عملة كل 15 دقيقة")
    while True:
-       for coin in COINS:
-           m = signal(coin)
-           if m:
-               await bot.send_message(chat_id=CHAT_ID, text=m)
-           await asyncio.sleep(2)
-       await asyncio.sleep(180)
-
-asyncio.run(main())
+       check_all()
+       time.sleep(900)

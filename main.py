@@ -1,81 +1,59 @@
-import os
-import logging
-import requests
-import ccxt
+import os, asyncio, ccxt
 import pandas as pd
 import ta
-from datetime import datetime
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Bot
 
-# ============ إعداداتك ============
 TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")  # حطه في Render اذا مو موجود
+CHAT_ID = os.getenv("CHAT_ID")
 
-COINS = [
-    "BTC/USDT","ETH/USDT","OP/USDT","RENDER/USDT","QNT/USDT","AVAX/USDT","SOL/USDT","DOT/USDT","LINK/USDT","BNB/USDT",
-    "TAO/USDT","ARB/USDT","SEI/USDT","SUI/USDT","INJ/USDT","NEAR/USDT","FIL/USDT","FET/USDT","ADA/USDT","ZRO/USDT",
-    "DYDX/USDT","AEVO/USDT","LTC/USDT"
-]
+# كل عملاتك
+COINS = ["WLD/USDT","FIL/USDT","QNT/USDT","DYDX/USDT","AEVO/USDT","BTC/USDT","ETH/USDT","SOL/USDT","OP/USDT","RENDER/USDT","AVAX/USDT","DOT/USDT","LINK/USDT","BNB/USDT","TAO/USDT","ARB/USDT","SEI/USDT","SUI/USDT","INJ/USDT","NEAR/USDT","FET/USDT","ADA/USDT","ZRO/USDT","LTC/USDT"]
 
-logging.basicConfig(level=logging.INFO)
 exchange = ccxt.binance()
+bot = Bot(token=TOKEN)
 
-def send_log(msg):
-    print(msg)
+def scalp_signal(symbol):
+   try:
+       bars = exchange.fetch_ohlcv(symbol, '15m', limit=100)
+       df = pd.DataFrame(bars, columns=['t','o','h','l','c','v'])
+       close = df['c']
 
-async def check_market(context: ContextTypes.DEFAULT_TYPE):
-    chat_id = context.job.chat_id
-    for symbol in COINS:
-        try:
-            bars = exchange.fetch_ohlcv(symbol, '15m', limit=100)
-            df = pd.DataFrame(bars, columns=['time','open','high','low','close','volume'])
-            df['rsi'] = ta.momentum.RSIIndicator(df['close'], 14).rsi()
-            df['ema20'] = ta.trend.EMAIndicator(df['close'], 20).ema_indicator()
-            df['vol_avg'] = df['volume'].rolling(20).mean()
-            last = df.iloc[-1]
-            
-            rsi = last['rsi']
-            trend = "Bearish" if last['close'] < last['ema20'] else "Bullish"
-            vol_conf = last['volume'] / last['vol_avg'] if last['vol_avg'] > 0 else 1
-            
-            signal_text = None
-            if rsi < 42 and trend == "Bearish" and vol_conf > 1.0:
-                signal_text = "🔴 EXIT SIGNAL - Sell your holdings"
-            elif rsi < 35 and trend == "Bullish" and vol_conf > 1.2:
-                signal_text = "🟢 BUY SIGNAL - Opportunity"
+       rsi = ta.momentum.RSIIndicator(close, 14).rsi().iloc[-1]
+       ema20 = ta.trend.EMAIndicator(close, 20).ema_indicator().iloc[-1]
+       price = close.iloc[-1]
+       vol = df['v'].iloc[-1]
+       vol_avg = df['v'].rolling(20).mean().iloc[-1]
 
-            if signal_text:
-                conf = round(50 + vol_conf*8 + abs(last['close']-last['ema20'])/last['close']*200, 1)
-                conf = min(conf, 89.9)
-                msg = f"""🤖 dot-bot | {symbol}
-Signal: {signal_text}
-Spot exit warning only — no short selling.
-Current price: {last['close']:.4f}
-RSI(14): {rsi:.2f} | 15m trend: {trend}
-Volume confirmation: {vol_conf:.2f}x 20-candle average
-Confidence: {conf}% (EMA distance + volume)
-Candle: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC"""
-                await context.bot.send_message(chat_id=chat_id, text=msg)
-        except Exception as e:
-            print(f"Error {symbol}: {e}")
-        await context.job_queue.run_once(lambda: None, 1) # راحة ثانية بين العملات
+       low_20 = df['l'].tail(20).min()
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"فيراري شغالة! 🏎️ أراقب {len(COINS)} عملة كل 15 دقيقة.\nارسل /scan عشان افحص الآن.")
-    if not context.chat_data.get('running'):
-        context.job_queue.run_repeating(check_market, interval=900, first=5, chat_id=update.effective_chat.id)
-        context.chat_data['running'] = True
+       # شرط اضرب واهرب: RSI نازل + قريب من دعم + فوليوم عالي
+       is_near_support = price <= low_20 * 1.01  # قريب 1% من قاع 20 شمعة
+       vol_ok = vol > vol_avg * 1.1
 
-async def scan_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"جاري فحص {len(COINS)} عملة الآن...")
-    await check_market(context)
+       if rsi < 38 and is_near_support and vol_ok and price > ema20:
+           entry = price
+           target = entry * 1.018  # هدف 1.8%
+           stop = entry * 0.99     # وقف 1%
+           return f"🟢 سكالب {symbol.replace('/USDT','')} \nدخول: {entry:.4f}\nهدف: {target:.4f} (+1.8%)\nوقف: {stop:.4f} (-1%)\nRSI: {rsi:.1f} - اضرب واهرب!"
 
-def main():
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("scan", scan_now))
-    app.run_polling()
+       if rsi > 65 and price < ema20:
+           return f"🔴 خروج {symbol.replace('/USDT','')} | السعر {price:.4f} | RSI {rsi:.1f}"
+
+   except Exception as e:
+       print(f"{symbol} error {e}")
+   return None
+
+async def loop():
+   await bot.send_message(chat_id=CHAT_ID, text=f"✅ بوت اضرب واهرب اشتغل!\nيراقب {len(COINS)} عملة\nWLD, FIL, QNT, DYDX...")
+   while True:
+       for coin in COINS:
+           msg = scalp_signal(coin)
+           if msg:
+               await bot.send_message(chat_id=CHAT_ID, text=msg)
+               await asyncio.sleep(2)
+           await asyncio.sleep(2)
+       await asyncio.sleep(180) # يفحص كل 3 دقايق
 
 if __name__ == "__main__":
-    main()
+   asyncio.run(loop())
+    

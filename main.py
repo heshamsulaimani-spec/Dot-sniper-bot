@@ -1,59 +1,52 @@
-import os, asyncio, ccxt
+import os, asyncio, ccxt, threading
 import pandas as pd
 import ta
 from telegram import Bot
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-# كل عملاتك
-COINS = ["WLD/USDT","FIL/USDT","QNT/USDT","DYDX/USDT","AEVO/USDT","BTC/USDT","ETH/USDT","SOL/USDT","OP/USDT","RENDER/USDT","AVAX/USDT","DOT/USDT","LINK/USDT","BNB/USDT","TAO/USDT","ARB/USDT","SEI/USDT","SUI/USDT","INJ/USDT","NEAR/USDT","FET/USDT","ADA/USDT","ZRO/USDT","LTC/USDT"]
+class H(BaseHTTPRequestHandler):
+   def do_GET(self):
+       self.send_response(200)
+       self.end_headers()
+       self.wfile.write(b"Bot is running")
+   def log_message(self, *args):
+       pass
+
+def run_web():
+   port = int(os.environ.get("PORT", 10000))
+   HTTPServer(('0.0.0.0', port), H).serve_forever()
+
+threading.Thread(target=run_web, daemon=True).start()
 
 exchange = ccxt.binance()
 bot = Bot(token=TOKEN)
+COINS = ["WLD/USDT","FIL/USDT","QNT/USDT","BTC/USDT","ETH/USDT","SOL/USDT","OP/USDT","AVAX/USDT","DOT/USDT","LINK/USDT","BNB/USDT","ARB/USDT"]
 
-def scalp_signal(symbol):
+def signal(s):
    try:
-       bars = exchange.fetch_ohlcv(symbol, '15m', limit=100)
-       df = pd.DataFrame(bars, columns=['t','o','h','l','c','v'])
-       close = df['c']
+       b = exchange.fetch_ohlcv(s, '15m', limit=100)
+       df = pd.DataFrame(b, columns=['t','o','h','l','c','v'])
+       c = df['c']
+       rsi = ta.momentum.RSIIndicator(c, 14).rsi().iloc[-1]
+       ema = ta.trend.EMAIndicator(c, 20).ema_indicator().iloc[-1]
+       p = c.iloc[-1]
+       low = df['l'].tail(20).min()
+       if rsi < 38 and p <= low * 1.015 and p > ema:
+           return f"🟢 {s.replace('/USDT','')} دخول {p:.4f} هدف {p*1.018:.4f} وقف {p*0.99:.4f}"
+   except:
+       pass
 
-       rsi = ta.momentum.RSIIndicator(close, 14).rsi().iloc[-1]
-       ema20 = ta.trend.EMAIndicator(close, 20).ema_indicator().iloc[-1]
-       price = close.iloc[-1]
-       vol = df['v'].iloc[-1]
-       vol_avg = df['v'].rolling(20).mean().iloc[-1]
-
-       low_20 = df['l'].tail(20).min()
-
-       # شرط اضرب واهرب: RSI نازل + قريب من دعم + فوليوم عالي
-       is_near_support = price <= low_20 * 1.01  # قريب 1% من قاع 20 شمعة
-       vol_ok = vol > vol_avg * 1.1
-
-       if rsi < 38 and is_near_support and vol_ok and price > ema20:
-           entry = price
-           target = entry * 1.018  # هدف 1.8%
-           stop = entry * 0.99     # وقف 1%
-           return f"🟢 سكالب {symbol.replace('/USDT','')} \nدخول: {entry:.4f}\nهدف: {target:.4f} (+1.8%)\nوقف: {stop:.4f} (-1%)\nRSI: {rsi:.1f} - اضرب واهرب!"
-
-       if rsi > 65 and price < ema20:
-           return f"🔴 خروج {symbol.replace('/USDT','')} | السعر {price:.4f} | RSI {rsi:.1f}"
-
-   except Exception as e:
-       print(f"{symbol} error {e}")
-   return None
-
-async def loop():
-   await bot.send_message(chat_id=CHAT_ID, text=f"✅ بوت اضرب واهرب اشتغل!\nيراقب {len(COINS)} عملة\nWLD, FIL, QNT, DYDX...")
+async def main():
+   await bot.send_message(chat_id=CHAT_ID, text="✅ البوت اشتغل - هذه آخر مرة نعدل الكود")
    while True:
        for coin in COINS:
-           msg = scalp_signal(coin)
-           if msg:
-               await bot.send_message(chat_id=CHAT_ID, text=msg)
-               await asyncio.sleep(2)
+           m = signal(coin)
+           if m:
+               await bot.send_message(chat_id=CHAT_ID, text=m)
            await asyncio.sleep(2)
-       await asyncio.sleep(180) # يفحص كل 3 دقايق
+       await asyncio.sleep(180)
 
-if __name__ == "__main__":
-   asyncio.run(loop())
-    
+asyncio.run(main())
